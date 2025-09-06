@@ -1,6 +1,6 @@
 {
     "livePreviewUseDevServer": true,
-    "livePreviewServerURL": "http://localhost/CGS/public/index.php",
+    "livePreviewServerURL": "http://localhost/CGS/install/install.php",
     "livePreviewServerProjectPath": "/",
     "livePreviewHotReloadSupported": false,
     "livePreviewFramework": "Custom"

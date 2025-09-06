@@ -1,6 +1,11 @@
-<?php require_once __DIR__.'/../src/bootstrap.php'; Auth::requireRole(['signatory','admin']);
-$id=(int)($_POST['step_id']??0); $comment=trim($_POST['comment']??'');
-$stmt=Database::$pdo->prepare('UPDATE clearance_steps SET status="cleared", comment=?, signed_by=?, signed_at=NOW() WHERE id=?');
-$stmt->execute([$comment,$_SESSION['uid'],$id]);
-header('Location: ../public/clearance_status.php?cid='.(int)($_POST['cid']??0));
+<?php require_once __DIR__.'/../src/bootstrap.php';
+header('Content-Type: application/json');
+$input = json_decode(file_get_contents('php://input'), true);
+if(!$input){ http_response_code(400); echo json_encode(['error'=>'Bad payload']); exit; }
+$name=trim($input['name']??''); $email=trim($input['email']??''); $pass=$input['password']??'';
+$pepper=$_ENV['PASSWORD_PEPPER']??''; $hash=password_hash(hash('sha256',$pass.$pepper),PASSWORD_DEFAULT);
+$stmt=Database::$pdo->prepare('INSERT INTO users(name,email,password_hash) VALUES(?,?,?)');
+$stmt->execute([$name,$email,$hash]);
+http_response_code(201); echo json_encode(['status'=>'ok']);
 ?>
+
