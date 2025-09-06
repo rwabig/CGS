@@ -45,12 +45,15 @@ class Certificate {
             . "Completion Year: {$cl['completion_year']}."
         );
 
-        // ✅ Local QR code generation (v4 style)
+        // ✅ Local QR code generation for core package
         $url = ($_ENV['APP_URL'] ?? 'http://localhost/CGS/public') . "/verify.php?code=$code";
 
-        $qr = QrCode::create($url)
-            ->withSize(150)
-            ->withMargin(5);
+        // size and margin passed as constructor args
+        $qr = new QrCode(
+            data: $url,
+            size: 150,
+            margin: 5
+        );
 
         $writer = new PngWriter();
         $qrResult = $writer->write($qr);
