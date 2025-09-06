@@ -1,31 +1,50 @@
-<?php require_once __DIR__.'/../src/bootstrap.php'; Auth::requireRole(['student']);
-if($_SERVER['REQUEST_METHOD']==='POST'){
-  $level=$_POST['level'];
-  $program=trim($_POST['program']);
-  $year=(int)$_POST['completion_year'];
-  $reg=trim($_POST['reg_no']);
-  $stmt=Database::$pdo->prepare('INSERT INTO clearances(user_id,level,program,completion_year,reg_no,status) VALUES(?,?,?,?,?,"in_progress")');
-  $stmt->execute([$_SESSION['uid'],$level,$program,$year,$reg]);
-  $cid=(int)Database::$pdo->lastInsertId();
-  // Create steps based on level (UG vs PG) using department slugs as per ARU forms
+<?php
+require_once __DIR__.'/../src/bootstrap.php';
+Auth::requireRole(['student']);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $level = $_POST['level'] ?? '';
+  $program = trim($_POST['program'] ?? '');
+  $year = (int)($_POST['completion_year'] ?? 0);
+  $reg = trim($_POST['reg_no'] ?? '');
+
+  // Create clearance record (status as parameter)
+  $stmt = Database::$pdo->prepare(
+    'INSERT INTO clearances(user_id,level,program,completion_year,reg_no,status)
+     VALUES(?,?,?,?,?,?)'
+  );
+  $stmt->execute([$_SESSION['uid'], $level, $program, $year, $reg, 'in_progress']);
+  $cid = (int)Database::$pdo->lastInsertId();
+
+  // workflows
   $ug = ['hod','library','ls_store','games','halls','accounts','dss','academic_admin'];
   $pg = ['dean_students','director_library','supervisor','hod','dean_school','accounts','dpgs','cict','exams'];
-  $flow = $level==='postgraduate' ? $pg : $ug;
-  $order=1;
-  foreach($flow as $slug){
-    $deptId=(int)Database::$pdo->prepare('SELECT id FROM departments WHERE slug=? LIMIT 1')->execute([$slug])?:0;
-    $stmt2=Database::$pdo->prepare('INSERT INTO clearance_steps(clearance_id,department_id,step_order) SELECT ?, id, ? FROM departments WHERE slug=?');
-    $stmt2->execute([$cid,$order++,$slug]);
+  $flow = $level === 'postgraduate' ? $pg : $ug;
+
+  // Insert clearance steps with signatory assignment
+  $order = 1;
+  foreach ($flow as $slug) {
+    $stmtDept = Database::$pdo->prepare('SELECT id, signatory_user_id FROM departments WHERE slug=? LIMIT 1');
+    $stmtDept->execute([$slug]);
+    $dept = $stmtDept->fetch();
+    if ($dept) {
+      Database::$pdo->prepare(
+        'INSERT INTO clearance_steps(clearance_id,department_id,step_order,assignee_user_id,status)
+         VALUES(?,?,?,?,?)'
+      )->execute([$cid, $dept['id'], $order++, $dept['signatory_user_id'], 'pending']);
+    }
   }
-  header('Location: clearance_status.php?cid='.$cid);
+
+  header('Location: clearance_status.php?cid=' . $cid);
   exit;
 }
 ?>
-<html lang="en"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>New Clearance — CGS</title>
-<link rel="stylesheet" href="assets/css/cgs.css"/>
-</head><body class="container">
+<link rel="stylesheet" href="assets/css/cgs.css">
+</head>
+<body class="container">
 <h2>Request Clearance</h2>
 <form method="post" class="card">
   <label>Level
@@ -39,4 +58,5 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   <label>Registration No. <input name="reg_no"></label>
   <button type="submit">Create</button>
 </form>
-</body></html>
+</body>
+</html>
