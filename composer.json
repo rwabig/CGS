@@ -1,6 +1,6 @@
 {
   "name": "rwabig/cgs",
-  "description": "Clearance Gateway System (CGS) — Web app for UG/PG clearance",
+  "description": "Clearance for Graduating Students (CGS) — Web app for UG/PG clearance",
   "type": "project",
   "require": {
     "php": ">=8.0",
