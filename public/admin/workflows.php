@@ -1,83 +1,116 @@
 <?php
-require_once __DIR__.'/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
 Auth::requireRole(['admin']);
 
-// fetch workflows
-$workflows = Database::$pdo->query(
-  'SELECT * FROM workflows ORDER BY level, step_order'
-)->fetchAll();
+// --- Search ---
+$search = trim($_GET['search'] ?? '');
 
-// fetch departments for dropdown
-$departments = Database::$pdo->query(
-  'SELECT id,name FROM departments ORDER BY name'
-)->fetchAll();
+// --- Pagination ---
+$page = max(1, (int)($_GET['page'] ?? 1));
+$perPage = 10;
+$offset = ($page - 1) * $perPage;
 
-// add new workflow step
-if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_step'])) {
-  $level = $_POST['level'];
-  $dept_id = (int)$_POST['department_id'];
-  $order = (int)$_POST['step_order'];
-  Database::$pdo->prepare(
-    'INSERT INTO workflows(level,department_id,step_order) VALUES(?,?,?)'
-  )->execute([$level,$dept_id,$order]);
-  header("Location: workflows.php"); exit;
-}
+// Count total
+$countStmt = Database::$pdo->prepare(
+    "SELECT COUNT(*)
+     FROM workflows w
+     JOIN departments d ON d.id = w.department_id
+     WHERE d.name LIKE ? OR w.level LIKE ?"
+);
+$countStmt->execute(["%$search%", "%$search%"]);
+$total = (int)$countStmt->fetchColumn();
+$totalPages = max(1, ceil($total / $perPage));
 
-// delete step
-if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['delete_step'])) {
-  $id = (int)$_POST['id'];
-  Database::$pdo->prepare('DELETE FROM workflows WHERE id=?')->execute([$id]);
-  header("Location: workflows.php"); exit;
-}
+// Fetch workflows
+$stmt = Database::$pdo->prepare(
+    "SELECT w.*, d.name as dept_name
+     FROM workflows w
+     JOIN departments d ON d.id = w.department_id
+     WHERE d.name LIKE ? OR w.level LIKE ?
+     ORDER BY w.level, w.step_order
+     LIMIT ? OFFSET ?"
+);
+$stmt->bindValue(1, "%$search%", PDO::PARAM_STR);
+$stmt->bindValue(2, "%$search%", PDO::PARAM_STR);
+$stmt->bindValue(3, $perPage, PDO::PARAM_INT);
+$stmt->bindValue(4, $offset, PDO::PARAM_INT);
+$stmt->execute();
+$workflows = $stmt->fetchAll();
+
+// Fetch departments
+$departments = Database::$pdo->query("SELECT id,name FROM departments ORDER BY name")->fetchAll();
 ?>
-<html lang="en">
-    <head><title></title>
-<meta charset="utf-8">
-<link rel="stylesheet" href="../assets/css/cgs.css">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="../assets/css/cgs.css">
 </head>
 <body class="container">
-<h2>Workflows</h2>
+<h2>Manage Workflows</h2>
 
-<form method="post" class="card">
-  <input type="hidden" name="add_step" value="1">
-  <label>Level
-    <select name="level" required>
+<form method="get" style="margin-bottom:1em;">
+  <input type="text" name="search" placeholder="Search by level or department" value="<?=e($search)?>">
+  <button type="submit">Search</button>
+</form>
+
+<form method="post" action="../../api/admin_add_workflow.php" class="card" style="margin-bottom:1em;">
+  <label>Level:
+    <select name="level">
       <option value="undergraduate">Undergraduate</option>
       <option value="postgraduate">Postgraduate</option>
     </select>
   </label>
-  <label>Department
-    <select name="department_id" required>
+  <label>Department:
+    <select name="department_id">
       <?php foreach($departments as $d): ?>
         <option value="<?=$d['id']?>"><?=e($d['name'])?></option>
       <?php endforeach; ?>
     </select>
   </label>
-  <label>Step Order <input type="number" name="step_order" min="1" required></label>
+  <label>Step Order: <input type="number" name="step_order" min="1" required></label>
   <button type="submit">Add Step</button>
 </form>
 
 <table class="table">
-  <thead><tr><th>ID</th><th>Level</th><th>Department</th><th>Order</th><th>Action</th></tr></thead>
-  <tbody>
-    <?php foreach($workflows as $w):
-      $deptName = '';
-      foreach($departments as $d){ if($d['id']==$w['department_id']) $deptName=$d['name']; }
-    ?>
+  <thead>
     <tr>
-      <td><?=$w['id']?></td>
-      <td><?=$w['level']?></td>
-      <td><?=e($deptName)?></td>
-      <td><?=$w['step_order']?></td>
-      <td>
-        <form method="post" style="display:inline" onsubmit="return confirm('Delete this step?');">
-          <input type="hidden" name="id" value="<?=$w['id']?>">
-          <button name="delete_step" value="1">Delete</button>
-        </form>
-      </td>
+      <th>ID</th><th>Level</th><th>Department</th><th>Order</th><th>Actions</th>
     </tr>
+  </thead>
+  <tbody>
+    <?php foreach($workflows as $w): ?>
+      <tr>
+        <td><?=e($w['id'])?></td>
+        <td><?=e($w['level'])?></td>
+        <td><?=e($w['dept_name'])?></td>
+        <td><?=e($w['step_order'])?></td>
+        <td>
+          <form method="post" action="../../api/admin_delete_workflow.php" style="display:inline;" onsubmit="return confirm('Delete this step?');">
+            <input type="hidden" name="id" value="<?=$w['id']?>">
+            <button type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
     <?php endforeach; ?>
+    <?php if(!$workflows): ?>
+      <tr><td colspan="5">No workflows found</td></tr>
+    <?php endif; ?>
   </tbody>
 </table>
+
+<!-- Pagination -->
+<div class="pagination">
+  <?php if($page > 1): ?>
+    <a href="?search=<?=urlencode($search)?>&page=<?=$page-1?>">Previous</a>
+  <?php endif; ?>
+
+  Page <?=$page?> of <?=$totalPages?>
+
+  <?php if($page < $totalPages): ?>
+    <a href="?search=<?=urlencode($search)?>&page=<?=$page+1?>">Next</a>
+  <?php endif; ?>
+</div>
+
 </body>
 </html>
