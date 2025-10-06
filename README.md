@@ -47,7 +47,7 @@ composer install
 This installs FPDF (used for PDF + QR certificates).
 4. Start Services
 
-    Launch XAMPP Control Panel → Start Apache & MySQL
+    Launch XAMPP Control Panel → Start Apache
 
 5. Run Installer
 
