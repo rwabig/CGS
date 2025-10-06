@@ -1,10 +1,61 @@
-# Secrets
-.env
-# IDE
-.vscode/
-.idea/
-# OS
-.DS_Store
-Thumbs.db
-# Vendor
-/vendor/
+# ==========================================
+# Core Project
+# ==========================================
+.env                  # 🔑 Never commit environment variables
+.env.*                # Extra env variants (.env.local, etc.)
+
+# ==========================================
+# Dependency / Package Managers
+# ==========================================
+vendor/              # Composer dependencies
+node_modules/        # (If you later add npm/yarn build tools)
+
+# ==========================================
+# Logs & Temp Files
+# ==========================================
+logs/
+*.log
+*.tmp
+*.cache
+*.bak
+*.swp
+
+# ==========================================
+# OS / Editor Junk
+# ==========================================
+.DS_Store            # macOS
+Thumbs.db            # Windows Explorer
+desktop.ini
+.idea/               # JetBrains IDEs
+.vscode/             # VS Code settings (keep if you want shared settings)
+*.sublime-workspace
+*.sublime-project
+
+# ==========================================
+# PHPUnit / Testing
+# ==========================================
+phpunit.xml
+phpunit.xml.cache
+coverage/
+.clover
+.phpunit.result.cache
+
+# ==========================================
+# Build Artifacts
+# ==========================================
+/public/assets/build/   # If you later compile assets
+/public/assets/cache/
+
+# ==========================================
+# Database Dumps (local-only)
+# ==========================================
+*.dump
+*.backup
+
+# ==========================================
+# Composer & NPM lock files (optional)
+# ==========================================
+# Uncomment if you don't want to track lock files
+# composer.lock
+# package-lock.json
+# yarn.lock

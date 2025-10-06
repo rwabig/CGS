@@ -1,79 +1,44 @@
 <?php
-require_once __DIR__.'/../../src/bootstrap.php';
-Auth::requireRole(['signatory','admin']);
+require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../includes/helpers.php';
+Auth::requireRole('signatory');
 
-$uid = $_SESSION['uid'];
-
-// check admin
-$roleStmt = Database::$pdo->prepare(
-  'SELECT r.slug FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=?'
-);
-$roleStmt->execute([$uid]);
-$roles = array_column($roleStmt->fetchAll(), 'slug');
-$isAdmin = in_array('admin', $roles, true);
-
-if ($isAdmin) {
-  $stmt = Database::$pdo->query(
-    'SELECT cs.id, cs.status, cs.comment, u.name AS student_name, u.reg_no,
-            d.name AS dept, c.level, c.program, c.completion_year, cs.id AS step_id
-     FROM clearance_steps cs
-     JOIN clearances c ON c.id = cs.clearance_id
-     JOIN users u ON u.id = c.user_id
-     JOIN departments d ON d.id = cs.department_id
-     WHERE cs.status = "pending"
-     ORDER BY cs.id DESC'
-  );
-} else {
-  $stmt = Database::$pdo->prepare(
-    'SELECT cs.id, cs.status, cs.comment, u.name AS student_name, u.reg_no,
-            d.name AS dept, c.level, c.program, c.completion_year, cs.id AS step_id
-     FROM clearance_steps cs
-     JOIN clearances c ON c.id = cs.clearance_id
-     JOIN users u ON u.id = c.user_id
-     JOIN departments d ON d.id = cs.department_id
-     WHERE cs.assignee_user_id = ? AND cs.status = "pending"
-     ORDER BY cs.id DESC'
-  );
-  $stmt->execute([$uid]);
-}
-$steps = $stmt->fetchAll();
+$pageTitle = "Signatory Dashboard";
+$user = Auth::user();
 ?>
+<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Pending Steps — CGS</title>
-<link rel="stylesheet" href="../assets/css/cgs.css">
+<head>
+  <meta charset="utf-8">
+  <title><?= $pageTitle ?> - CGS</title>
+  <link href="../assets/css/cgs.css" rel="stylesheet">
+  <style>
+    body { background:#f3f4f6; font-family:Arial,sans-serif; }
+    .container { max-width:1000px; margin:20px auto; padding:20px; }
+    .cards { display:grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap:20px; }
+    .card { background:white; padding:20px; border-radius:10px; box-shadow:0 4px 10px rgba(0,0,0,0.08); }
+    h2 { font-size:18px; margin-bottom:10px; }
+    p { font-size:14px; color:#374151; }
+    .btn { display:inline-block; margin-top:10px; background:#2563eb; color:white; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:14px; }
+    .btn:hover { background:#1d4ed8; }
+  </style>
 </head>
-<body class="container">
-<h2>My Pending Steps</h2>
+<body>
+<?php include __DIR__ . '/../includes/menu.php'; ?>
 
-<?php if(!$steps): ?>
-  <p>No pending steps assigned to you.</p>
-<?php else: ?>
-  <table class="table">
-    <thead>
-      <tr><th>Student</th><th>Reg No</th><th>Level</th><th>Programme</th><th>Year</th><th>Department</th><th>Action</th></tr>
-    </thead>
-    <tbody>
-      <?php foreach($steps as $s): ?>
-      <tr>
-        <td><?=e($s['student_name'])?></td>
-        <td><?=e($s['reg_no'])?></td>
-        <td><?=e($s['level'])?></td>
-        <td><?=e($s['program'])?></td>
-        <td><?=e($s['completion_year'])?></td>
-        <td><?=e($s['dept'])?></td>
-        <td>
-          <form method="post" action="../../api/sign_step.php">
-            <input type="hidden" name="step_id" value="<?=e($s['id'])?>">
-            <input type="text" name="comment" placeholder="Optional comment">
-            <button type="submit">Sign</button>
-          </form>
-        </td>
-      </tr>
-      <?php endforeach; ?>
-    </tbody>
-  </table>
-<?php endif; ?>
+<div class="container">
+  <h1>Welcome, <?= htmlspecialchars($user['email']) ?></h1>
+  <p>Here you can review and sign clearance requests assigned to you.</p>
 
+  <div class="cards">
+    <div class="card">
+      <h2>Pending Clearance Tasks</h2>
+      <p>Review student clearance requests and approve or reject as appropriate.</p>
+      <a href="clearance_tasks.php" class="btn">View Tasks</a>
+    </div>
+  </div>
+</div>
+
+<footer>© <?= date('Y') ?> University Digital Clearance System | Signatory Portal</footer>
 </body>
 </html>

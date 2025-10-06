@@ -8,6 +8,10 @@ This folder holds incremental schema updates.
 ### How to apply a migration manually
 ```bash
 mysql -u root -p cgs < database/migrations/20250905_add_certificate_table.sql
+for windows
+mysql -u root -p cgs < C:\xampp\htdocs\CGS\database\migrations\20230915_create_migrations_log.sql
+for postgresql
+PS C:\xampp\htdocs\CGS> psql -U postgres -d cgs -f database/migrations/2025_09_28_alter_staff_profiles.sql
 ```
 
 ### Naming convention

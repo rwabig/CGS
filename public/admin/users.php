@@ -1,166 +1,226 @@
 <?php
+// public/admin/users.php
 require_once __DIR__ . '/../../src/bootstrap.php';
-Auth::requireRole(['admin']);
+require_once __DIR__ . '/../includes/helpers.php';
 
-// --- Search & Filter ---
+// Allow Admins and Super Admins
+if (!Auth::hasRole('admin') && !Auth::hasRole('super_admin')) {
+    redirect('../login.php');
+}
+
+$db = Database::getConnection();
+$pageTitle = "User Management";
+
+// map requested "role" param (friendly names) to role slugs in DB
+$roleParam = $_GET['role'] ?? 'student';
+$roleMap = [
+    'student'     => 'student',
+    'staff'       => 'signatory', // support legacy 'staff' param
+    'signatory'   => 'signatory',
+    'admin'       => 'admin',
+    'super_admin' => 'super_admin',
+];
+$roleSlug = $roleMap[$roleParam] ?? 'student';
+$roleParam = array_key_exists($roleParam, $roleMap) ? $roleParam : 'student';
+
 $search = trim($_GET['search'] ?? '');
-$statusFilter = $_GET['status'] ?? 'all';
 
-// --- Pagination ---
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 10;
-$offset = ($page - 1) * $perPage;
+// protected accounts
+$protectedEmails = [];
+$envDefault = getenv('DEFAULT_SUPER_ADMIN_EMAIL');
+if ($envDefault) $protectedEmails[] = $envDefault;
+$protectedEmails[] = 'rwabig@gmail.com';
+$protectedEmails = array_unique($protectedEmails);
 
-// Build WHERE conditions
-$where = "WHERE (u.name LIKE ? OR u.email LIKE ?)";
-$params = ["%$search%", "%$search%"];
+// Build query
+$sql = "
+  SELECT u.id, u.email, u.is_active, u.status, u.last_login,
+         sp.full_name AS student_name, sp.registration_number,
+         stf.full_name AS staff_name, adm.full_name AS admin_name
+  FROM users u
+  LEFT JOIN student_profiles sp ON sp.user_id = u.id
+  LEFT JOIN staff_profiles stf  ON stf.user_id = u.id
+  LEFT JOIN admin_profiles adm  ON adm.user_id = u.id
+  WHERE EXISTS (
+      SELECT 1 FROM user_roles ur
+      JOIN roles r ON ur.role_id = r.id
+      WHERE ur.user_id = u.id AND r.slug = :role
+  )
+";
+$params = [':role' => $roleSlug];
 
-if ($statusFilter === 'active') {
-    $where .= " AND u.is_active = 1";
-} elseif ($statusFilter === 'inactive') {
-    $where .= " AND u.is_active = 0";
+if ($search) {
+    $sql .= " AND (LOWER(u.email) LIKE :search
+               OR LOWER(sp.full_name) LIKE :search
+               OR LOWER(sp.registration_number) LIKE :search
+               OR LOWER(stf.full_name) LIKE :search
+               OR LOWER(adm.full_name) LIKE :search)";
+    $params[':search'] = '%' . strtolower($search) . '%';
 }
 
-// Count total
-$countStmt = Database::$pdo->prepare("SELECT COUNT(*) FROM users u $where");
-$countStmt->execute($params);
-$total = (int)$countStmt->fetchColumn();
-$totalPages = max(1, ceil($total / $perPage));
+$sql .= " ORDER BY u.id DESC";
+$stmt = $db->prepare($sql);
+$stmt->execute($params);
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch users
-$stmt = Database::$pdo->prepare(
-    "SELECT u.*, GROUP_CONCAT(r.slug) as role_slugs, GROUP_CONCAT(r.name) as role_names
-     FROM users u
-     LEFT JOIN user_roles ur ON u.id = ur.user_id
-     LEFT JOIN roles r ON ur.role_id = r.id
-     $where
-     GROUP BY u.id
-     ORDER BY u.id DESC
-     LIMIT ? OFFSET ?"
-);
-foreach ($params as $i => $val) {
-    $stmt->bindValue($i+1, $val, PDO::PARAM_STR);
-}
-$stmt->bindValue(count($params)+1, $perPage, PDO::PARAM_INT);
-$stmt->bindValue(count($params)+2, $offset, PDO::PARAM_INT);
-$stmt->execute();
-$users = $stmt->fetchAll();
-
-// Fetch all roles
-$allRoles = Database::$pdo->query("SELECT id, name, slug FROM roles ORDER BY name")->fetchAll();
+// Audit
+logAudit('admin_user_view', "Viewed user list role={$roleSlug} search=" . ($search ?: ''));
 ?>
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <link rel="stylesheet" href="../assets/css/cgs.css">
+  <title>Admin | User Management</title>
+  <link href="../assets/css/cgs.css" rel="stylesheet">
   <style>
-    .badge { background:#eee; border-radius:6px; padding:2px 6px; margin:0 2px; }
-    .inactive { color:#a00; font-weight:bold; }
-    .filters { margin-bottom: 1em; }
+    body { background:#f3f4f6; font-family:Arial,sans-serif; margin:0; }
+    .container { max-width:1200px; margin:auto; padding:20px; }
+    h1 { font-size:22px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; }
+    .tabs { display:flex; gap:10px; margin-bottom:15px; }
+    .tab { padding:8px 14px; border-radius:6px; background:#e5e7eb; cursor:pointer; text-decoration:none; color:#111; font-size:14px; }
+    .tab.active { background:#2563eb; color:#fff; }
+    form.search-bar { display:flex; gap:8px; margin-bottom:15px; }
+    form.search-bar input { flex:1; padding:8px; border:1px solid #ccc; border-radius:6px; }
+    form.search-bar button { background:#2563eb; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; }
+    form.search-bar button:hover { background:#1d4ed8; }
+    .btn { background:#2563eb; color:white; padding:6px 10px; border:none; border-radius:6px; text-decoration:none; font-size:13px; margin:2px; display:inline-block; }
+    .btn:hover { background:#1d4ed8; }
+    .btn-muted { background:#9ca3af; }
+    .btn-danger { background:#dc2626; }
+    .btn-danger:hover { background:#b91c1c; }
+    .status-active { color:green; font-weight:bold; }
+    .status-inactive { color:red; font-weight:bold; }
+    table { width:100%; border-collapse:collapse; background:white; border-radius:8px; overflow:hidden; }
+    th, td { padding:10px; border-bottom:1px solid #e5e7eb; font-size:14px; vertical-align:top; }
+    th { background:#f9fafb; text-align:left; }
+    tr:last-child td { border-bottom:none; }
+    footer { margin-top:30px; background:#000; color:white; text-align:center; padding:8px; font-size:13px; }
+    .actions { display:flex; flex-wrap:wrap; gap:6px; }
+    .note { color:#6b7280; font-size:13px; margin-top:8px; }
   </style>
-  <script>
-    function toggleAll(source) {
-      const checkboxes = document.querySelectorAll('.user-checkbox');
-      checkboxes.forEach(cb => cb.checked = source.checked);
-    }
-  </script>
 </head>
-<body class="container">
-<h2>Manage Users</h2>
+<body>
+<?php include __DIR__ . '/../includes/menu.php'; ?>
 
-<form method="get" class="filters">
-  <input type="text" name="search" placeholder="Search by name or email" value="<?=e($search)?>">
-  <select name="status">
-    <option value="all" <?= $statusFilter==='all'?'selected':'' ?>>All</option>
-    <option value="active" <?= $statusFilter==='active'?'selected':'' ?>>Active</option>
-    <option value="inactive" <?= $statusFilter==='inactive'?'selected':'' ?>>Inactive</option>
-  </select>
-  <button type="submit">Apply</button>
-</form>
+<div class="container">
+  <h1>
+    User Management
+    <?php if ($roleSlug === 'signatory'): ?>
+      <a href="create_user.php" class="btn">+ Create Staff Account</a>
+    <?php endif; ?>
+  </h1>
 
-<form method="post" action="../../api/admin_bulk_action.php">
-<table class="table">
-  <thead>
+  <div class="tabs" role="tablist" aria-label="Role Tabs">
+    <a href="?role=student" class="tab <?= $roleParam==='student' ? 'active' : '' ?>">Students</a>
+    <a href="?role=staff"  class="tab <?= ($roleParam==='staff' || $roleParam==='signatory') ? 'active' : '' ?>">Staff</a>
+    <a href="?role=admin"  class="tab <?= $roleParam==='admin' ? 'active' : '' ?>">Admins</a>
+    <a href="?role=super_admin" class="tab <?= $roleParam==='super_admin' ? 'active' : '' ?>">Super Admins</a>
+  </div>
+
+  <form method="get" class="search-bar" role="search" aria-label="Search users">
+    <input type="hidden" name="role" value="<?= htmlspecialchars($roleParam) ?>">
+    <input type="text" name="search" placeholder="Search by email, name, reg no..." value="<?= htmlspecialchars($search) ?>">
+    <button type="submit">Search</button>
+  </form>
+
+  <?php if ($users): ?>
+  <table>
     <tr>
-      <th><input type="checkbox" onclick="toggleAll(this)"></th>
-      <th>ID</th><th>Name</th><th>Email</th><th>Reg No</th><th>Status</th><th>Roles</th>
+      <th>ID</th>
+      <th>Email</th>
+      <th>Name</th>
+      <?php if ($roleSlug==='student'): ?><th>Reg No</th><?php endif; ?>
+      <th>Status</th>
+      <th>Last Login</th>
+      <th>Actions</th>
     </tr>
-  </thead>
-  <tbody>
-    <?php foreach($users as $u):
-      $userRoles = $u['role_slugs'] ? explode(',', $u['role_slugs']) : [];
-      $userRoleNames = $u['role_names'] ? explode(',', $u['role_names']) : [];
+    <?php foreach ($users as $u):
+        $email = $u['email'];
+        $isProtected = in_array($email, $protectedEmails, true);
+        $displayName = $u['student_name'] ?? $u['staff_name'] ?? $u['admin_name'] ?? '-';
     ?>
       <tr>
-        <td><input type="checkbox" name="user_ids[]" value="<?=$u['id']?>" class="user-checkbox"></td>
-        <td><?=e($u['id'])?></td>
-        <td><?=e($u['name'])?></td>
-        <td><?=e($u['email'])?></td>
-        <td><?=e($u['reg_no'])?></td>
-        <td>
-          <?php if($u['is_active']): ?>
-            <span class="badge">Active</span>
-          <?php else: ?>
-            <span class="badge inactive">Inactive</span>
-          <?php endif; ?>
+        <td><?= (int)$u['id'] ?></td>
+        <td><?= htmlspecialchars($email) ?></td>
+        <td><?= htmlspecialchars($displayName) ?></td>
+        <?php if ($roleSlug==='student'): ?>
+          <td><?= htmlspecialchars($u['registration_number'] ?? '-') ?></td>
+        <?php endif; ?>
+        <td class="<?= $u['is_active'] ? 'status-active' : 'status-inactive' ?>">
+          <?= $u['is_active'] ? 'Active' : 'Inactive' ?>
         </td>
+        <td><?= $u['last_login'] ? htmlspecialchars($u['last_login']) : '-' ?></td>
         <td>
-          <?php foreach($userRoleNames as $r): ?>
-            <span class="badge"><?=e($r)?></span>
-          <?php endforeach; ?>
+          <div class="actions">
+            <!-- Safe View: send to role-specific profile page -->
+            <?php if ($roleSlug === 'student'): ?>
+              <a class="btn" href="../student/profile.php?user=<?= (int)$u['id'] ?>">View</a>
+            <?php elseif ($roleSlug === 'signatory'): ?>
+              <a class="btn" href="../signatory/profile.php?user=<?= (int)$u['id'] ?>">View</a>
+            <?php elseif ($roleSlug === 'admin'): ?>
+              <a class="btn" href="../admin/profile.php?user=<?= (int)$u['id'] ?>">View</a>
+            <?php elseif ($roleSlug === 'super_admin'): ?>
+              <a class="btn" href="../super_admin/profile.php?user=<?= (int)$u['id'] ?>">View</a>
+            <?php endif; ?>
+
+            <!-- Edit -->
+            <a class="btn" href="edit_user.php?user=<?= (int)$u['id'] ?>">Edit</a>
+
+            <!-- Assign Roles -->
+            <a class="btn" href="assign_roles.php?user=<?= (int)$u['id'] ?>">Assign Roles</a>
+
+            <!-- Activate/Deactivate -->
+            <?php if ($isProtected): ?>
+              <span class="btn btn-muted">Protected</span>
+            <?php else: ?>
+              <?php if ($u['is_active']): ?>
+                <a class="btn btn-danger" href="toggle_user.php?user=<?= (int)$u['id'] ?>&action=deactivate" onclick="return confirm('Deactivate this user?')">Deactivate</a>
+              <?php else: ?>
+                <a class="btn" href="toggle_user.php?user=<?= (int)$u['id'] ?>&action=activate">Activate</a>
+              <?php endif; ?>
+            <?php endif; ?>
+
+            <!-- Delete -->
+            <?php if ($isProtected): ?>
+              <span class="btn btn-muted">No Delete</span>
+            <?php else: ?>
+              <a class="btn btn-danger" href="delete_user.php?user=<?= (int)$u['id'] ?>" onclick="return confirm('DELETE this account? This cannot be undone.')">Delete</a>
+            <?php endif; ?>
+
+            <!-- Upgrade / Downgrade -->
+            <?php
+              if ($roleSlug === 'signatory') {
+                  if (!$isProtected) {
+                      echo '<a class="btn" href="upgrade_role.php?user='.(int)$u['id'].'&to=admin">Upgrade → Admin</a>';
+                  } else {
+                      echo '<span class="btn btn-muted">Protected</span>';
+                  }
+              } elseif ($roleSlug === 'admin') {
+                  if (!$isProtected) {
+                      echo '<a class="btn" href="upgrade_role.php?user='.(int)$u['id'].'&to=signatory">Downgrade → Staff</a>';
+                  } else {
+                      echo '<span class="btn btn-muted">Protected</span>';
+                  }
+                  echo '<a class="btn" href="upgrade_role.php?user='.(int)$u['id'].'&to=super_admin">Upgrade → Super Admin</a>';
+              } elseif ($roleSlug === 'super_admin') {
+                  if (!$isProtected) {
+                      echo '<a class="btn" href="upgrade_role.php?user='.(int)$u['id'].'&to=admin">Downgrade → Admin</a>';
+                  } else {
+                      echo '<span class="btn btn-muted">Protected</span>';
+                  }
+              }
+            ?>
+          </div>
         </td>
       </tr>
     <?php endforeach; ?>
-    <?php if(!$users): ?>
-      <tr><td colspan="7">No users found</td></tr>
-    <?php endif; ?>
-  </tbody>
-</table>
-
-<div style="margin-top:1em;">
-  <select name="bulk_action" id="bulk_action" required onchange="toggleRoleSelector()">
-    <option value="">-- Bulk Action --</option>
-    <option value="activate">Activate</option>
-    <option value="deactivate">Deactivate</option>
-    <option value="assign_roles">Assign Roles</option>
-    <option value="clear_roles">Clear Roles</option>
-  </select>
-
-  <select name="role_ids[]" id="role_selector" multiple size="3" style="display:none;">
-    <?php foreach($allRoles as $role): ?>
-      <option value="<?=$role['id']?>"><?=e($role['name'])?></option>
-    <?php endforeach; ?>
-  </select>
-
-  <button type="submit">Apply</button>
-</div>
-</form>
-
-<script>
-  function toggleRoleSelector() {
-    const action = document.getElementById('bulk_action').value;
-    const selector = document.getElementById('role_selector');
-    if (action === 'assign_roles' || action === 'clear_roles') {
-      selector.style.display = 'inline-block';
-    } else {
-      selector.style.display = 'none';
-    }
-  }
-</script>
-
-<!-- Pagination -->
-<div class="pagination">
-  <?php if($page > 1): ?>
-    <a href="?search=<?=urlencode($search)?>&status=<?=urlencode($statusFilter)?>&page=<?=$page-1?>">Previous</a>
+  </table>
+  <?php else: ?>
+    <p>No users found for this role.</p>
   <?php endif; ?>
-
-  Page <?=$page?> of <?=$totalPages?>
-
-  <?php if($page < $totalPages): ?>
-    <a href="?search=<?=urlencode($search)?>&status=<?=urlencode($statusFilter)?>&page=<?=$page+1?>">Next</a>
-  <?php endif; ?>
+  <p class="note">Tip: Protected accounts (installed default) cannot be deleted, deactivated or downgraded.</p>
 </div>
 
+<footer>© <?= date('Y') ?> University Digital Clearance System | Admin Panel</footer>
 </body>
 </html>
