@@ -14,10 +14,14 @@ The system manages student clearance workflows, signatory approvals, and profile
 
 Requirements
 
-- PHP **8.1+**
-- PostgreSQL **13+** (or adjust SQL for MySQL if needed)
-- Composer
-- Node.js (optional, if compiling frontend assets)
+Apache **2.4+**
+OpenSSL **3.1+**
+PHP **8.2+**
+xamp
+PostgreSQL postgis **17+**
+Composer
+Node.js
+Nginx (proxy)
 - XAMPP / LAMP / WAMP stack for local development
 
 
